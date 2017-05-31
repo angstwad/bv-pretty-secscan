@@ -11,7 +11,10 @@ from termcolor import colored
 from prettytable import PrettyTable
 
 
-REGEXP = re.compile(r'^([\d.:]+);(?:[\w:-]+)\( instance_id: (i-[\w]+); region: ([\w-]+); stackName: ([\w-]+); service:\s?([\w-]+); role: ([\w-]+); vpc: ([\w-]+)\s?\)$')  # noqa
+REGEXPS = (
+    re.compile(r'^([\d.:]+);(?:[\w:-]+)\( instance_id: (i-[\w]+); region: ([\w-]+); stackName: ([\w-]+); service:\s?([\w-]+); role: ([\w-]+); vpc: ([\w-]+)\s?\)$'),  # noqa
+    re.compile(r'^([\d.:]+);(?:[\w:-]+)\( instance_id:\s*(i-[\w]+); region:\s*([\w-]+); stackName:\s*([\w-]+); service:\s*([\w-]+); role:\s*([\w-]+); vpc:\s*([\w-]+)\s*\)$')  # noqa
+)
 CLEAN_REGEXP = re.compile('<.*?>')
 FIELDS = [
     'IP/Port',
@@ -41,6 +44,8 @@ green = functools.partial(colored, color='green')
 yellow = functools.partial(colored, color='yellow')
 
 
+bad_lines = []
+
 def remove_html(string):
     return re.sub(CLEAN_REGEXP, '', string)
 
@@ -61,12 +66,29 @@ def parse_args():
         help='Limit table to specific columns by column name. Please note '
              'that this is case sensitive.'
     )
+    parser.add_argument(
+        '--show-unparsed-lines',
+        action='store_true',
+        help='Show lines that could not be parsed.'
+    )
     return parser.parse_args()
+
+
+def get_matches(asset_list):
+    for asset in asset_list:
+        match = None
+        for regexp in REGEXPS:
+            match = re.match(regexp, asset)
+            if not match:
+                continue
+            yield match
+        if match is None:
+            bad_lines.append(asset)
 
 
 def make_table(assets):
     split = assets.split('\n')
-    matches = (re.match(REGEXP, asset) for asset in split if asset)
+    matches = get_matches(asset for asset in split if asset)
     table = PrettyTable(field_names=FIELDS)
     for match in matches:
         table.add_row(match.groups())
@@ -92,7 +114,6 @@ def main():
         except ValueError:
             raise SystemExit(
                 'Error processing file: content has unexpected format')
-
 
         fix = ' '.join(line.strip() for line in fix.split('\n'))
         vuln = ', '.join(line for line in vuln.split('\n') if line)
@@ -122,6 +143,16 @@ def main():
         print(blue('Vulnerabilities: ') + yellow(issue.vulnerabilities))
         print()
         print(issue.assets)
+
+    if bad_lines and not args.show_unparsed_lines:
+        print('\n' * 3)
+        print('There were some lines that could not be parsed.  Use '
+              '"--show-unparsed-lines" to see them.')
+
+    elif bad_lines and args.show_unparsed_lines:
+        print('\n' * 3)
+        print(red('The following lines could not be parsed:'))
+        [print(line) for line in bad_lines]
 
 
 if __name__ == '__main__':
