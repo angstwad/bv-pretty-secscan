@@ -9,11 +9,12 @@ from collections import namedtuple
 
 from termcolor import colored
 from prettytable import PrettyTable
+from prettytable.prettytable import PLAIN_COLUMNS, DEFAULT
 
 
 REGEXPS = (
     re.compile(r'^([\d.:]+);(?:[\w:-]+)\( instance_id: (i-[\w]+); region: ([\w-]+); stackName: ([\w-]+); service:\s?([\w-]+); role: ([\w-]+); vpc: ([\w-]+)\s?\)$'),  # noqa
-    re.compile(r'^([\d.:]+);(?:[\w:-]+)\( instance_id:\s*(i-[\w]+); region:\s*([\w-]+); stackName:\s*([\w-]+); service:\s*([\w-]+); role:\s*([\w-]+); vpc:\s*([\w-]+)\s*\)$')  # noqa
+    re.compile(r'^([\d.:-]+);(?:[\w:-]+)\( instance_id:\s*(i-[\w]+); region:\s*([\w-]+); stackName:\s*([\w-]+); service:\s*([\w-]+); role:\s*([\w-]+); vpc:\s*([\w-]+)\s*\)$')  # noqa
 )
 CLEAN_REGEXP = re.compile('<.*?>')
 FIELDS = [
@@ -38,13 +39,14 @@ Issue = namedtuple(
     ]
 )
 
+bad_lines = []
+ptable_style = DEFAULT
+
 red = functools.partial(colored, color='red')
 blue = functools.partial(colored, color='blue')
 green = functools.partial(colored, color='green')
 yellow = functools.partial(colored, color='yellow')
 
-
-bad_lines = []
 
 def remove_html(string):
     return re.sub(CLEAN_REGEXP, '', string)
@@ -65,6 +67,11 @@ def parse_args():
         choices=FIELDS,
         help='Limit table to specific columns by column name. Please note '
              'that this is case sensitive.'
+    )
+    parser.add_argument(
+        '--plain-column',
+        action='store_true',
+        help='Use plain columns in table'
     )
     parser.add_argument(
         '--show-unparsed-lines',
@@ -90,40 +97,37 @@ def make_table(assets):
     split = assets.split('\n')
     matches = get_matches(asset for asset in split if asset)
     table = PrettyTable(field_names=FIELDS)
+    table.set_style(ptable_style)
     for match in matches:
         table.add_row(match.groups())
     table.align = 'l'
     return table
 
 
-def main():
-    args = parse_args()
-
+def exit_if_not_csv(filename):
     try:
-        assert args.file.name.lower().endswith('.csv'), 'File is not a CSV.'
+        assert filename.lower().endswith('.csv'), 'File is not a CSV.'
     except AssertionError as e:
         raise SystemExit(e)
 
-    reader = csv.reader(args.file)
-    next(reader)  # intentionally skip the headers
 
-    issues = []
-    for line in reader:
-        try:
-            remed, sev, info, fix, appl, vuln = line[:-1]
-        except ValueError:
-            raise SystemExit(
-                'Error processing file: content has unexpected format')
+def make_issue(line, fields):
+    try:
+        remed, sev, info, fix, appl, vuln = line[:-1]
+    except ValueError:
+        raise SystemExit(
+            'Error processing file: content has unexpected format')
 
-        fix = ' '.join(line.strip() for line in fix.split('\n'))
-        vuln = ', '.join(line for line in vuln.split('\n') if line)
+    fix = ' '.join(line.strip() for line in fix.split('\n'))
+    vuln = ', '.join(line for line in vuln.split('\n') if line)
 
-        table = make_table(line[-1])
-        table_str = table.get_string(fields=args.fields or FIELDS)
+    table = make_table(line[-1])
+    table_str = table.get_string(fields=fields or FIELDS)
 
-        issue = Issue(remed, sev, info, fix, appl, vuln, table_str)
-        issues.append(issue)
+    return Issue(remed, sev, info, fix, appl, vuln, table_str)
 
+
+def make_output(issues):
     for index, issue in enumerate(issues):
         issue_severity = issue.severity.strip().lower()
         if issue_severity == 'severe':
@@ -143,6 +147,21 @@ def main():
         print(blue('Vulnerabilities: ') + yellow(issue.vulnerabilities))
         print()
         print(issue.assets)
+
+
+def main():
+    args = parse_args()
+    print(args)
+
+    if args.plain_column:
+        global ptable_style
+        ptable_style = PLAIN_COLUMNS
+
+    exit_if_not_csv(args.file.name)
+    reader = csv.reader(args.file)
+    next(reader)  # intentionally skip the headers
+    issues = (make_issue(line, args.fields) for line in reader)
+    make_output(issues)
 
     if bad_lines and not args.show_unparsed_lines:
         print('\n' * 3)
