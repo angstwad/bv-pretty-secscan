@@ -151,7 +151,6 @@ def make_output(issues):
 
 def main():
     args = parse_args()
-    print(args)
 
     if args.plain_column:
         global ptable_style

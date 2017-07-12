@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='bv-pretty-secscan',
-    version='0.1.2',
+    version='0.1.3',
     packages=['bv_pretty_secscan'],
     author='Paul Durivage',
     author_email='pauldurivage@gmail.com',
